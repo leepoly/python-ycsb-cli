@@ -56,7 +56,7 @@ def main(args):
 
     ycsb_load(tracename + '.load', client, hasValidation)
     ycsb_run(tracename + '.run', client, hasValidation)
-
+    client.endserver()
 
 def argparser():
     ''' Argument parser. '''
