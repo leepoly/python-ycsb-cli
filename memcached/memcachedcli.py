@@ -4,7 +4,7 @@ from pymemcache.client.base import Client
 
 validDic = {}
 
-op_type = ['INSERT', 'READ', 'UPDATE', 'SCAN']
+op_type = ['INSERT', 'READ', 'UPDATE', 'SCAN', 'DELETE']
 
 def parse_line(line, client, hasValidation):
     found_op = 'None'
@@ -27,6 +27,12 @@ def parse_line(line, client, hasValidation):
         if hasValidation:
             cli_value_decode = cli_value.decode()
             assert(cli_value_decode == validDic[key])
+    elif op == 'SCAN':
+        print('Not support scan operation')
+    elif op == 'DELETE':
+        client.delete(key)
+        if hasValidation:
+            del validDic[key]
     # print(op, ':', key, value)
 
 # YCSB load section
