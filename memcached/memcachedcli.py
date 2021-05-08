@@ -1,14 +1,15 @@
-from pymemcache.client.base import Client
+import argparse
 import os, sys
+from pymemcache.client.base import Client
 
 hasValidation = True
 validDic = {}
 
-op_list = ['INSERT', 'READ', 'UPDATE', 'SCAN']
+op_type = ['INSERT', 'READ', 'UPDATE', 'SCAN']
 
-def parse_line(line):
+def parse_line(line, client):
     found_op = 'None'
-    for op in op_list:
+    for op in op_type:
         if line.startswith(op):
             found_op = op
             break
@@ -30,28 +31,44 @@ def parse_line(line):
     # print(op, ':', key, value)
 
 # YCSB load section
-def ycsb_load(load_trace):
+def ycsb_load(load_trace, client):
     insert_cnt = 0
     with open(load_trace) as load_file:
         for line in load_file:
-            parse_line(line)
+            parse_line(line, client)
             insert_cnt += 1
     print("insert {} entries".format(insert_cnt))
 
-def ycsb_run(run_trace):
-    check_cnt = 0
+def ycsb_run(run_trace, client):
+    op_cnt = 0
     with open(run_trace) as run_file:
         for line in run_file:
-            parse_line(line)
-            check_cnt += 1
-    print("execute {} entries".format(check_cnt))
+            parse_line(line, client)
+            op_cnt += 1
+    print("execute {} entries".format(op_cnt))
+
+def main(args):
+    port = args.port
+    tracename = args.trace
+
+    server_addr = 'localhost:' + port
+    client = Client(server_addr)
+
+    ycsb_load(tracename + '.load', client)
+    ycsb_run(tracename + '.run', client)
 
 
-port = '11211'
-if len(sys.argv) > 1:
-    port = sys.argv[1]
-server_addr = 'localhost:' + port
-client = Client(server_addr)
+def argparser():
+    ''' Argument parser. '''
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--port', required=False,
+                    default='11211',
+                    help='Port ID. Memcached default: 11211')
+    ap.add_argument('--trace', required=False,
+                    default='workload/workloada',
+                    help='Trace name. Make sure the existance of workloada.load and workloada.run respectively.')
+    return ap
 
-ycsb_load('../workload/ycsb_load.txt')
-ycsb_run('../workload/ycsb_run.txt')
+if __name__ == '__main__':
+    main(argparser().parse_args())
+
