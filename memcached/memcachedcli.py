@@ -1,10 +1,16 @@
 import argparse
 import time
+import os, sys
+import asyncio
+from subprocess import Popen
+from signal import *
 from pymemcache.client.base import Client
 
 validDic = {}
 op_type = ['INSERT', 'READ', 'UPDATE', 'SCAN', 'DELETE']
 endserver = False
+client = None
+zsim_proc = None
 
 def parse_line(line, client, hasValidation):
     found_op = 'None'
@@ -42,7 +48,7 @@ def ycsb_load(load_trace, client, hasValidation):
         for line in load_file:
             parse_line(line, client, hasValidation)
             insert_cnt += 1
-    print("insert {} entries".format(insert_cnt))
+    print("[client] insert {} entries".format(insert_cnt))
 
 def ycsb_run(run_trace, client, hasValidation, target):
     op_cnt = 0
@@ -60,25 +66,73 @@ def ycsb_run(run_trace, client, hasValidation, target):
                     time.sleep(cur_time - last_throttle_time)
                 last_throttle_time = cur_time
 
-    print("execute {} entries".format(op_cnt))
+    print("[client] execute {} entries".format(op_cnt))
+
+# async def get_mapped_port(zsimruncfg):
+def get_mapped_port(zsimruncfg):
+    filepath = os.path.join(os.path.dirname(zsimruncfg), 'p0', 'portlist') # we assume memcached is executed in the first process p0
+    print(filepath)
+    while not os.path.exists(filepath):
+        print('[client] wait 10s')
+        # await asyncio.sleep(1)
+        time.sleep(10)
+    real = -1
+    with open(filepath) as port_list:
+        for line in port_list:
+            virt = line.split(' ')[0]
+            if virt == '11211':
+                real = line.split(' ')[1].strip()
+            break
+    print("[client] get real port {}!".format(real))
+    return real
+
+def remove_prev_portlist(zsimruncfg):
+    filepath = os.path.join(os.path.dirname(zsimruncfg), 'p0', 'portlist') # we assume memcached is executed in the first process p0
+    if os.path.exists(filepath):
+        os.remove(filepath)
+
+def sim_end(*args):
+    if client is not None:
+        if endserver:
+            client.endserver()
+        else:
+            client.quit()
+    # elif zsim_proc is not None:
+    #     zsim_proc.terminate()
+    sys.exit(0)
 
 def main(args):
-    global endserver
+    global endserver, zsim_proc
     port = args.port
     tracename = args.trace
     hasValidation = args.validate
     target = int(args.target)
-    endserver = (args.endserver)
+    endserver = args.endserver
+    if args.zsimruncfg is not None:
+        endserver = True # must quit server after simulation
+        for sig in (SIGABRT, SIGILL, SIGINT, SIGSEGV, SIGTERM):
+            signal(sig, sim_end)
+        assert(args.zsimpath is not None)
+        zsimbinpath = os.path.abspath(args.zsimpath)
+        zsimrundir = os.path.dirname(args.zsimruncfg)
+        cur_path = os.getcwd()
+        remove_prev_portlist(args.zsimruncfg)
+        os.chdir(zsimrundir)
+        zsim_proc = Popen([zsimbinpath, args.zsimruncfg])
+        os.chdir(cur_path)
+        # port = asyncio.run(get_mapped_port(args.zsimruncfg))
+        port = get_mapped_port(args.zsimruncfg)
+        if port == -1:
+            print("[Error] cannot get memcached mapped port")
+            sim_end()
 
     server_addr = 'localhost:' + port
     client = Client(server_addr, default_noreply=True)
 
     ycsb_load(tracename + '.load', client, hasValidation)
     ycsb_run(tracename + '.run', client, hasValidation, target)
-    if endserver:
-        client.endserver()
-    else:
-        client.quit()
+    sim_end()
+
 
 def argparser():
     ''' Argument parser. '''
@@ -96,6 +150,12 @@ def argparser():
                     help='Target ops/sec')
     ap.add_argument('--endserver', action='store_true',
                     help='Quit memcached server after test finishes (require customed memcached support)')
+    ap.add_argument('--zsimpath', required=False,
+                    default=None,
+                    help='Zsim binary path')
+    ap.add_argument('--zsimruncfg', required=False,
+                    default=None,
+                    help='Start simulating memcached server in zsim. Set zsimpath and zsimruncfg')
 
     return ap
 
